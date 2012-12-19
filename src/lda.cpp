@@ -31,7 +31,7 @@ void show_help();
 int main(int argc, char ** argv) {
     model lda;
 
-    // definition based on specified corpus
+    // definition based on specified corpus (Ad-hoc setting)
     int train_docnum = 2500;
     int test_docnum = 2500;
     int dicnum = 12000;

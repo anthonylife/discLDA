@@ -238,7 +238,7 @@ int model::load_model(string model_name) {
     string filename = dir + model_name + tassign_suffix;
     FILE * fin = fopen(filename.c_str(), "r");
     if (!fin) {
-	printf("Cannot open file %d to load model!\n", filename.c_str());
+	printf("Cannot open file %s to load model!\n", filename.c_str());
 	return 1;
     }
     
@@ -827,13 +827,16 @@ void model::estimate() {
     compute_phi();
     liter--;
     //save_model(utils::generate_model_name(-1));
-    string featurefile_phi = "../features/review_features.lda.gibbs++.phi.tr.txt";
-    string featurefile_theta = "../features/review_features.lda.gibbs++.theta.tr.txt";
-    string tassignfile = "../features/review.lda.gibbs++.tr";
-    string otherparafile = "../features/review.lda.gibbs++.tr";
-    save_model(featurefile_phi, featurefile_theta, tassignfile, \
-            otherparafile);
+    string phi_file = "../features/review.lda.gibbs++.phi.tr.txt";
+    string theta_file = "../features/review.lda.gibbs++.theta.tr.txt";
+    string tassign_file = "../features/review.lda.gibbs++.tr";
+    string otherpara_file = "../features/review.lda.gibbs++.tr";
+    save_model(phi_file, theta_file, tassign_file, \
+            otherpara_file);
     
+    // compute features
+    string fea_file = "../features/review_features.lda.gibbs++.tr.txt";
+    compute_train_feature(fea_file);
 }
 
 int model::sampling(int m, int n) {
@@ -882,6 +885,37 @@ void model::compute_theta() {
     }
 }
 
+// Compute train features for training data (No smooth).
+void model::compute_train_feature(string fea_file){
+    
+    double ** tr_fea = new double*[M];
+    for (int m = 0; m < M; m++){
+        tr_fea[m] = new double[K];
+    }
+    
+    for (int m = 0; m < M; m++) {
+        for (int k = 0; k < K; k++){
+            tr_fea[m][k] = nd[m][k] / ndsum[m];
+        }
+    } 
+    
+    // output features
+    FILE * fout = fopen(fea_file.c_str(), "w");
+    if (!fout) {
+	    printf("Cannot open file %s to save!\n", fea_file.c_str());
+	    return ;
+    }
+    
+    for (int i = 0; i < M; i++) {
+	    for (int j = 0; j < K; j++) {
+	        fprintf(fout, "%f ", tr_fea[i][j]);
+	    }
+	    fprintf(fout, "\n");
+    }
+    
+    fclose(fout);
+}
+
 void model::compute_phi() {
     for (int k = 0; k < K; k++) {
 	for (int w = 0; w < V; w++) {
@@ -910,6 +944,17 @@ int model::init_inf(int dicnum, int docnum, int headernum) {
         }
     }
 	
+    // new records
+    dict = new bool[V+1];   // may start from 1
+    for (m = 0; m < V+1; m++)
+        dict[m] = false;
+
+    for (m = 0; m < ptrndata->M; m++){
+        for (n = 0; n < ptrndata->docs[m]->length; n++){
+            dict[ptrndata->docs[m]->words[n]] = true;
+        }
+    }
+    
     nd = new int*[M];
     for (m = 0; m < M; m++) {
         nd[m] = new int[K];
@@ -1065,10 +1110,14 @@ void model::inference() {
     compute_newphi();
     inf_liter--;
     
-    string featurefile_phi = "../features/review_features.lda.gibbs++.phi.tst.txt";
-    string featurefile_theta = "../features/review_features.lda.gibbs++.theta.tst.txt";
-    string tassignfile = "../features/review.lda.gibbs++.tst";
-    save_inf_model(featurefile_phi, featurefile_theta, tassignfile);
+    string phi_file = "../features/review.lda.gibbs++.phi.tst.txt";
+    string theta_file = "../features/review.lda.gibbs++.theta.tst.txt";
+    string tassign_file = "../features/review.lda.gibbs++.tst";
+    save_inf_model(phi_file, theta_file, tassign_file);
+
+    // features
+    string fea_file = "../features/review_features.lda.gibbs++.tst.txt";
+    compute_test_feature(fea_file);
 }
 
 int model::inf_sampling(int m, int n) {
@@ -1125,6 +1174,37 @@ void model::compute_newphi() {
 		newphi[k][w] = (nw[w][k] + newnw[w][k] + beta) / (nwsum[k] + newnwsum[k] + V * beta);
 	}
     }
+}
+
+// Compute features for test data (No smooth).
+void model::compute_test_feature(string fea_file){
+    
+    double ** tst_fea = new double*[M];
+    for (int m = 0; m < M; m++){
+        tst_fea[m] = new double[K];
+    }
+    
+    for (int m = 0; m < M; m++) {
+        for (int k = 0; k < K; k++){
+            tst_fea[m][k] = newnd[m][k] / newndsum[m];
+        }
+    } 
+    
+    // output features
+    FILE * fout = fopen(fea_file.c_str(), "w");
+    if (!fout) {
+	    printf("Cannot open file %s to save!\n", fea_file.c_str());
+	    return ;
+    }
+    
+    for (int i = 0; i < M; i++) {
+	    for (int j = 0; j < K; j++) {
+	        fprintf(fout, "%f ", tst_fea[i][j]);
+	    }
+	    fprintf(fout, "\n");
+    }
+    
+    fclose(fout);
 }
 
 void model::compute_loglikhood(double * lik_biarray, string choice){

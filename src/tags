@@ -32,7 +32,8 @@ add_doc	dataset.h	/^    void add_doc(document * doc, int idx) {$/;"	f	class:data
 allocate	dataset.cpp	/^void document::allocate(int totalwdcnt){$/;"	f	class:document
 alpha	model.h	/^    double alpha, beta; \/\/ LDA hyperparameters $/;"	m	class:model
 beta	model.h	/^    double alpha, beta; \/\/ LDA hyperparameters $/;"	m	class:model
-compute_loglikhood	model.cpp	/^void model::compute_loglikhood(double * lik_biarray){$/;"	f	class:model
+compute_feature	model.cpp	/^void model::compute_feature(){$/;"	f	class:model
+compute_loglikhood	model.cpp	/^void model::compute_loglikhood(double * lik_biarray, string choice){$/;"	f	class:model
 compute_newphi	model.cpp	/^void model::compute_newphi() {$/;"	f	class:model
 compute_newtheta	model.cpp	/^void model::compute_newtheta() {$/;"	f	class:model
 compute_perplexity	model.cpp	/^float model::compute_perplexity(double log_lik){$/;"	f	class:model
@@ -123,7 +124,7 @@ save_inf_model_others	model.cpp	/^int model::save_inf_model_others(string filena
 save_inf_model_tassign	model.cpp	/^int model::save_inf_model_tassign(string filename) {$/;"	f	class:model
 save_inf_model_twords	model.cpp	/^int model::save_inf_model_twords(string filename) {$/;"	f	class:model
 save_model	model.cpp	/^int model::save_model(string model_name) {$/;"	f	class:model
-save_model	model.cpp	/^int model::save_model(string phifile, string thetafile, string tassignfile){$/;"	f	class:model
+save_model	model.cpp	/^int model::save_model(string phifile, string thetafile, string tassignfile,\\$/;"	f	class:model
 save_model_others	model.cpp	/^int model::save_model_others(string filename) {$/;"	f	class:model
 save_model_phi	model.cpp	/^int model::save_model_phi(string filename) {$/;"	f	class:model
 save_model_tassign	model.cpp	/^int model::save_model_tassign(string filename) {$/;"	f	class:model

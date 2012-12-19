@@ -95,6 +95,8 @@ public:
     int * newndsum;
     double ** newtheta;
     double ** newphi;
+    bool * dict;    // record which word occured in training data
+    
     // --------------------------------------
     
     model() {
@@ -161,6 +163,10 @@ public:
     // compute corpus log-likelihood and per-word loglikelihood
     void compute_loglikhood(double *, string choice);
     float compute_perplexity(double loglikhood);
+
+    // compute features for training data and test data
+    void compute_train_feature(string fea_file);
+    void compute_test_feature(string fea_file);
 };
 
 #endif
