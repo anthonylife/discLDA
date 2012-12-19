@@ -895,7 +895,7 @@ void model::compute_train_feature(string fea_file){
     
     for (int m = 0; m < M; m++) {
         for (int k = 0; k < K; k++){
-            tr_fea[m][k] = nd[m][k] / ndsum[m];
+            tr_fea[m][k] = (double)nd[m][k] / ndsum[m];
         }
     } 
     
@@ -1186,7 +1186,7 @@ void model::compute_test_feature(string fea_file){
     
     for (int m = 0; m < M; m++) {
         for (int k = 0; k < K; k++){
-            tst_fea[m][k] = newnd[m][k] / newndsum[m];
+            tst_fea[m][k] = (double)newnd[m][k] / newndsum[m];
         }
     } 
     
