@@ -37,7 +37,7 @@
 
 using namespace std;
 
-// LDA model
+// discLDA model
 class model {
 public:
     // fixed options
@@ -83,7 +83,15 @@ public:
     int * ndsum; // nasum[i]: total number of words in document i, size M
     double ** theta; // theta: document-topic distributions, size M x K
     double ** phi; // phi: topic-word distributions, size K x V
-    
+   
+    // for slda model with discriminative learning.
+    double * eta;   // mean of Gaussian distribution
+    double sigma;   // variance of Gaussian distribution
+    double bias;    // bias of linear regression
+    double * gau_prob;  // probability of Gaussian distribution
+    string tr_rate_str;
+    string eta_str;
+
     // for inference only
     int inf_liter;
     int newM;
@@ -150,6 +158,8 @@ public:
     int sampling(int m, int n);
     void compute_theta();
     void compute_phi();
+    void compute_ns_theta();
+    void compute_ns_phi();
     
     // init for inference
     int init_inf();
@@ -159,6 +169,8 @@ public:
     int inf_sampling(int m, int n);
     void compute_newtheta();
     void compute_newphi();
+    void compute_ns_newtheta();
+    void compute_ns_newphi();
 
     // compute corpus log-likelihood and per-word loglikelihood
     void compute_loglikhood(double *, string choice);
@@ -167,6 +179,15 @@ public:
     // compute features for training data and test data
     void compute_train_feature(string fea_file);
     void compute_test_feature(string fea_file);
+    double ** compute_train_feature();
+
+    // for discLDA
+    void tr_gau_prob(int doc_id, int wd_id);
+    void tst_gau_prob(int doc_id, int wd_id);
+    void mle_learn();
+    void pre_mle_learn();
+    void save_eta(string eta_file);
+    void read_eta(string eta_file);
 };
 
 #endif

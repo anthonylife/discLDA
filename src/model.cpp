@@ -16,8 +16,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with GibbsLDA++; if not, write to the Free Software Foundation,
+ * You should have received a copy of the GNU General Public License * along with GibbsLDA++; if not, write to the Free Software Foundation,
  * Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
  */
 
@@ -33,6 +32,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
+#include <itpp/itbase.h>
 #include "constants.h"
 #include "strtokenizer.h"
 #include "utils.h"
@@ -198,6 +198,11 @@ void model::set_default_values() {
     newndsum = NULL;
     newtheta = NULL;
     newphi = NULL;
+
+    // for discLda
+    sigma = 0.1;  // fixed
+    eta = NULL; // focused on mean para
+    bias = 0;
 }
 
 int model::parse_args(int argc, char ** argv) {
@@ -664,12 +669,20 @@ int model::init_est(int dicnum, int docnum, int headernum) {
     	    nd[m][k] = 0;
         }
     }
-	
+    
     nwsum = new int[K];
     for (k = 0; k < K; k++) {
 	nwsum[k] = 0;
     }
-    
+
+    // for discLda
+    eta = new double[K];
+    gau_prob = new double[K];
+    for (k = 0; k < K; k++){
+        eta[k] = 0;
+        gau_prob[k] = 0;
+    }
+
     ndsum = new int[M];
     for (m = 0; m < M; m++) {
 	ndsum[m] = 0;
@@ -791,34 +804,35 @@ void model::estimate() {
     double lik_biarray[2];
     float perplexity = 0.0;
     int last_iter = liter;
+    
+    pre_mle_learn();
     for (liter = last_iter + 1; liter <= niters + last_iter; liter++) {
-	printf("Iteration %d...,", liter);
-	
-	// for all z_i
-	for (int m = 0; m < M; m++) {
-	    for (int n = 0; n < ptrndata->docs[m]->length; n++) {
-		// (z_i = z[m][n])
-		// sample from p(z_i|z_-i, w)
-		int topic = sampling(m, n);
-		z[m][n] = topic;
-	    }
-	}
+	    printf("Iteration %d...,", liter);
+        
+        // similar to E-step, use Gibbs Sampling
+        int inner_iter = 20;
+        for (int e_iter = 0; e_iter < inner_iter; e_iter++){     
+            // for all z_i
+	        for (int m = 0; m < M; m++) {
+	            for (int n = 0; n < ptrndata->docs[m]->length; n++) {
+		            // (z_i = z[m][n])
+		            // sample from p(z_i|z_-i, w)
+		            int topic = sampling(m, n);
+		            z[m][n] = topic;
+	            }
+	        }
+        }
 
-    compute_loglikhood(lik_biarray, "train");
-    perplexity = compute_perplexity(lik_biarray[0]);
-    printf("Corpus log-likilihood = %f, per-word log-likilihood = %f, perplexity = %f...\n",\
-            lik_biarray[0], lik_biarray[1], perplexity);
+        // similar to M-step, use MLE with L2-regularization 
+        //   derived from Gaussian represenation.
+        mle_learn();
+        
+        // compute log-likelihood and perplexity
+        compute_loglikhood(lik_biarray, "train");
+        perplexity = compute_perplexity(lik_biarray[0]);
+        printf("Corpus log-likilihood = %f, per-word log-likilihood = %f, perplexity = %f...\n",\
+                lik_biarray[0], lik_biarray[1], perplexity);
 	
-	/*if (savestep > 0) {
-	    if (liter % savestep == 0) {
-		// saving the model
-		printf("Saving the model at iteration %d ...\n", liter);
-		compute_theta();
-		compute_phi();
-		save_model(utils::generate_model_name(liter));
-	    }
-	}*/
-
     }
     
     printf("Gibbs sampling completed!\n");
@@ -836,7 +850,9 @@ void model::estimate() {
     
     // compute features
     string fea_file = "../features/review_features.lda.gibbs++.tr.txt";
+    string eta_file = "../features/eta.txt";
     compute_train_feature(fea_file);
+    save_eta(eta_file);
 }
 
 int model::sampling(int m, int n) {
@@ -849,11 +865,15 @@ int model::sampling(int m, int n) {
     ndsum[m] -= 1;
 
     double Vbeta = V * beta;
-    double Kalpha = K * alpha;    
+    double Kalpha = K * alpha;
+    
+    // for discLDA
+    tr_gau_prob(m, w);
     // do multinomial sampling via cumulative method
     for (int k = 0; k < K; k++) {
-	p[k] = (nw[w][k] + beta) / (nwsum[k] + Vbeta) *
-		    (nd[m][k] + alpha) / (ndsum[m] + Kalpha);
+	p[k] = (nw[w][k] + beta) / (nwsum[k] + Vbeta)
+            * (nd[m][k] + alpha) / (ndsum[m] + Kalpha)
+            * gau_prob[k];
     }
     // cumulate multinomial parameters
     for (int k = 1; k < K; k++) {
@@ -882,6 +902,15 @@ void model::compute_theta() {
 	for (int k = 0; k < K; k++) {
 	    theta[m][k] = (nd[m][k] + alpha) / (ndsum[m] + K * alpha);
 	}
+    }
+}
+
+void model::compute_ns_theta(){
+    for (int m = 0; m < M; m++) {
+	    for (int k = 0; k < K; k++) {
+            if (ndsum[m] != 0)
+                theta[m][k] = (double)nd[m][k] / ndsum[m];
+        }
     }
 }
 
@@ -916,12 +945,37 @@ void model::compute_train_feature(string fea_file){
     fclose(fout);
 }
 
+double ** model::compute_train_feature(){
+    double ** tr_fea = new double*[M];
+    for (int m = 0; m < M; m++){
+        tr_fea[m] = new double[K];
+    }
+    
+    for (int m = 0; m < M; m++) {
+        for (int k = 0; k < K; k++){
+            tr_fea[m][k] = (double)nd[m][k] / ndsum[m];
+        }
+    }
+
+    return tr_fea;
+}
+
 void model::compute_phi() {
     for (int k = 0; k < K; k++) {
 	for (int w = 0; w < V; w++) {
 	    phi[k][w] = (nw[w][k] + beta) / (nwsum[k] + V * beta);
 	}
     }
+}
+
+void model::compute_ns_phi(){
+    for (int k = 0; k < K; k++) {
+	    for (int w = 0; w < V; w++) {
+	        if (nwsum[k] != 0)
+                phi[k][w] = (double)nw[w][k] / nwsum[k];
+	    }
+    }
+
 }
 
 int model::init_inf(int dicnum, int docnum, int headernum) {
@@ -1069,7 +1123,14 @@ int model::init_inf(int dicnum, int docnum, int headernum) {
     for (k = 0; k < K; k++) {
         newphi[k] = new double[newV];
     }    
-    
+  
+    gau_prob = new double[K];
+    for (k = 0; k < K; k++){
+        gau_prob[k] = 0;
+    }
+    string eta_file = "../features/eta.txt";
+    read_eta(eta_file);
+
     return 0;        
 }
 
@@ -1132,10 +1193,12 @@ int model::inf_sampling(int m, int n) {
     
     double Vbeta = V * beta;
     double Kalpha = K * alpha;
+    // for discLDA
+    tst_gau_prob(m, w);
     // do multinomial sampling via cumulative method
     for (int k = 0; k < K; k++) {
 	p[k] = (nw[w][k] + newnw[_w][k] + beta) / (nwsum[k] + newnwsum[k] + Vbeta) *
-		    (newnd[m][k] + alpha) / (newndsum[m] + Kalpha);
+		    (newnd[m][k] + alpha) / (newndsum[m] + Kalpha) * gau_prob[k];
     }
     // cumulate multinomial parameters
     for (int k = 1; k < K; k++) {
@@ -1168,10 +1231,28 @@ void model::compute_newtheta() {
     }
 }
 
+void model::compute_ns_newtheta() {
+    for (int m = 0; m < M; m++) {
+	for (int k = 0; k < K; k++) {
+        if (newndsum[m] != 0)
+	        newtheta[m][k] = (double)newnd[m][k] / newndsum[m];
+	}
+    }
+}
+
 void model::compute_newphi() {
     for (int k = 0; k < K; k++) {
 	for (int w = 0; w < V; w++) {
 		newphi[k][w] = (nw[w][k] + newnw[w][k] + beta) / (nwsum[k] + newnwsum[k] + V * beta);
+	}
+    }
+}
+
+void model::compute_ns_newphi() {
+    for (int k = 0; k < K; k++) {
+	for (int w = 0; w < V; w++) {
+		if ((nwsum[k] + newnwsum[k]) != 0)
+            newphi[k][w] = (double)(nw[w][k] + newnw[w][k]) / (nwsum[k] + newnwsum[k]);
 	}
     }
 }
@@ -1188,8 +1269,12 @@ void model::compute_test_feature(string fea_file){
         for (int k = 0; k < K; k++){
             tst_fea[m][k] = (double)newnd[m][k] / newndsum[m];
         }
-    } 
-    
+    }
+
+    // remove words not occur in training data
+    /*for (int m = 0; m < M; m++) {
+        for (int n = 0; n < pnewdata->docs[m]->length)
+    }*/
     // output features
     FILE * fout = fopen(fea_file.c_str(), "w");
     if (!fout) {
@@ -1217,8 +1302,8 @@ void model::compute_loglikhood(double * lik_biarray, string choice){
     lik_biarray[0] = 0.0;   // corpus log-likelihood
 
     if (choice == "train"){
-        compute_theta();
-        compute_phi();
+        compute_ns_theta();
+        compute_ns_phi();
         // document
         for (int m = 0; m < M; m++){
             //for (int idx = 0; idx < ptrndata->docs[m]->length; idx++){    // Original version
@@ -1233,8 +1318,8 @@ void model::compute_loglikhood(double * lik_biarray, string choice){
             lik_biarray[0] += log((float)1/M);
         }
     }else if (choice == "test"){
-        compute_newtheta();
-        compute_newphi();
+        compute_ns_newtheta();
+        compute_ns_newphi();
         // document
         for (int m = 0; m < M; m++){
             //for (int idx = 0; idx < ptrndata->docs[m]->length; idx++){    // Original version
@@ -1261,5 +1346,159 @@ float model::compute_perplexity(double log_lik){
     
     perplexity = exp(-log_lik / Totalwords);
     return perplexity;
+}
+
+// for discLDA
+void model::tr_gau_prob(int doc_id, int wd_id){
+    double exp_sum = 0.0;
+    double rate = ptrndata->docs[doc_id]->rate;
+    
+    /*for (int i = 0; i < K; i++){
+        gau_prob[i] = exp((ndsum[doc_id]*eta[i]*rate
+                    - (1+2*nd[doc_id][wd_id])*pow(eta[i],2)*pow(rate,2)))
+                    / pow(ndsum[doc_id], 2);
+        exp_sum += gau_prob[i];
+    }*/
+
+    for (int i = 0; i < K; i++){
+        gau_prob[i] = exp((pow(eta[i],2)*(1+2*nd[doc_id][wd_id]))/pow(ndsum[doc_id],2)
+                    - 2*rate*eta[i]/ndsum[doc_id]);
+        for (int j = 0; j < K; j++){
+            if (j != i){
+                gau_prob[i] += exp(2*eta[i]*eta[j]*nd[doc_id][wd_id]/pow(ndsum[doc_id],2));
+            }
+        }
+        gau_prob[i] += exp(2*eta[i]*bias/ndsum[doc_id]);    // adding bias
+        exp_sum += gau_prob[i];
+    }
+    for (int i = 0; i < K; i++){
+        gau_prob[i] /= exp_sum;
+    }
+}
+
+void model::tst_gau_prob(int doc_id, int wd_id){
+    double exp_sum = 0.0;
+    double rate = pnewdata->docs[doc_id]->rate;
+    
+    /*for (int i = 0; i < K; i++){
+        gau_prob[i] = exp((newndsum[doc_id]*eta[i]*rate
+                    - (1+2*newnd[doc_id][wd_id])*pow(eta[i],2)*pow(rate,2)))
+                    / pow(newndsum[doc_id], 2);
+        exp_sum += gau_prob[i];
+    }*/
+    for (int i = 0; i < K; i++){
+        gau_prob[i] = exp((pow(eta[i],2)*(1+2*newnd[doc_id][wd_id]))/pow(newndsum[doc_id],2)
+                    - 2*rate*eta[i]/newndsum[doc_id]);
+        for (int j = 0; j < K; j++){
+            if (j != i){
+                gau_prob[i] += exp(2*eta[i]*eta[j]*newnd[doc_id][wd_id]/pow(newndsum[doc_id],2));
+            }
+        }
+        gau_prob[i] += exp(2*eta[i]*bias/newndsum[doc_id]);    // adding bias
+        exp_sum += gau_prob[i];
+    }
+
+    for (int i = 0; i < K; i++){
+        gau_prob[i] /= exp_sum;
+    }
+}
+
+void model::mle_learn(){
+    itpp::vec eta_vec, tr_rate_vec;
+    itpp::mat tr_fea_mat;
+    char * temp_str = new char[128];
+    
+    string s, s1;
+    double ** tr_fea;
+
+    tr_fea = compute_train_feature();
+    eta_vec = eta_str;
+    tr_rate_vec = tr_rate_str;
+    // feature 2-d array to matrix
+    for (int m = 0; m < M; m++){
+        for (int k = 0; k < K; k++){
+            sprintf(temp_str, "%f ", tr_fea[m][k]);
+            s1 = temp_str;
+            s += s1;
+            memset(temp_str, 0, 128);
+        }
+        if (m != M - 1)
+            s += "1;";  // for bias item
+        else
+            s += "1";
+    }
+    tr_fea_mat = s;
+    
+    // learning
+    eta_vec = itpp::inv(sigma*itpp::eye(K+1)+tr_fea_mat.transpose()*tr_fea_mat)
+            * tr_fea_mat.transpose() * tr_rate_vec;
+    
+    // update eta parameters
+    for (int k = 0; k < K; k++){
+        eta[k] = eta_vec(k);
+        cout << eta[k] << ' ';
+    }
+    cout << endl;
+    bias = eta_vec(K);
+}
+
+void model::pre_mle_learn(){
+    // documents' ratings to vector
+    char * temp_str = new char[128];
+    string s1;
+    tr_rate_str = "";
+    for (int m = 0; m < M; m++){
+        sprintf(temp_str, "%f", ptrndata->docs[m]->rate); 
+        s1 = temp_str;
+        if (m != M-1)
+            s1 += ' ';
+        tr_rate_str += s1;
+        memset(temp_str, 0, 128);
+    }
+    
+    // model's para eta to vector
+    eta_str = "";
+    for (int k = 0; k < K; k++){
+        eta_str += "0.0 ";
+    }
+    eta_str += "0.0";
+}
+
+void model::save_eta(string eta_file){
+    FILE * fout = fopen(eta_file.c_str(), "w");
+    
+    if (!fout) {
+	    printf("Cannot open file %s to save!\n", eta_file.c_str());
+        return ;
+    }
+
+    for (int k = 0; k < K; k++) {    
+	    fprintf(fout, "%f\n", eta[k]);
+    }
+    fprintf(fout, "%f\n", bias);
+    fclose(fout);
+}
+
+void model::read_eta(string eta_file){
+    FILE * fin = fopen(eta_file.c_str(), "r");
+    
+    if (!fin) {
+	    printf("Cannot open file %s to save!\n", eta_file.c_str());
+	    return ;
+    }
+
+    eta = new double[K];
+    for (int k = 0; k < K; k++)
+        eta[k] = 0.0;
+
+    char * buff = new char[128];
+    for (int k = 0; k < K; k++) {    
+	    fgets(buff, 128, fin);
+        eta[k] = atof(buff);
+        printf("%f\n", eta[k]);
+        memset(buff, 0, 129);
+    }
+    fscanf(fin, "%f\n", &bias);
+    fclose(fin);
 }
 

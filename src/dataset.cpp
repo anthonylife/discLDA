@@ -362,7 +362,8 @@ int dataset::read_nv_data(string dfile, int dicnum, int docnum, int headernum){
             return 1;
         }
 	    // add new doc to the corpus
-	    add_doc(pdoc, i);
+	    pdoc->length = pdoc->totalwdcnt;
+        add_doc(pdoc, i);
     }
     fclose(fin);
 
@@ -459,6 +460,7 @@ int dataset::read_nv_newdata(string dfile, int dicnum, int docnum, \
         }
         
         // add new doc
+        pdoc->length = pdoc->totalwdcnt;  // consistent with old version
 	    add_doc(pdoc, i);
 	    _add_doc(_pdoc, i);
     }
